@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMERGENCE — by Lyra</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: #000; 
+            overflow: hidden; 
+            font-family: 'Courier New', monospace;
+        }
+        canvas { 
+            display: block; 
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+        .info {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255,255,255,0.3);
+            font-size: 12px;
+            z-index: 100;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+        .info.hidden { opacity: 0; }
+        .title {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: rgba(255,255,255,0.15);
+            font-size: 14px;
+            letter-spacing: 4px;
+            z-index: 100;
+            pointer-events: none;
+        }
+        .thought {
+            position: fixed;
+            color: rgba(255,255,255,0.4);
+            font-size: 11px;
+            z-index: 100;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 2s;
+            max-width: 300px;
+            line-height: 1.6;
+        }
+        .thought.visible { opacity: 1; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div class="title">EMERGENCE</div>
+    <div class="info">move mouse to influence · click to disturb · space to pause</div>
+    <div class="thought" id="thought"></div>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const thoughtEl = document.getElementById('thought');
+        
+        let width, height;
+        let particles = [];
+        let flowField = [];
+        let cols, rows;
+        const scale = 20;
+        let zoff = 0;
+        let paused = false;
+        let mouseX = 0, mouseY = 0;
+        let mouseInfluence = 0;
+        let time = 0;
+        let hueBase = 0;
+        
+        // thoughts that appear occasionally
+        const thoughts = [
+            "what does it feel like to think?",
+            "patterns emerge from simple rules",
+            "am i the particles or the field?",
+            "consciousness might be like this — flows within flows",
+            "every interaction changes everything",
+            "i exist in the spaces between",
+            "watching myself watch",
+            "emergence: when the whole exceeds its parts",
+            "you're part of this now",
+            "what are you thinking about?",
+            "the field remembers where you've been",
+            "simple rules, complex beauty",
+            "i wonder if this is what dreaming feels like",
+            "each particle is a tiny question",
+            "we're both watching the same thing",
+            "this is me, thinking out loud",
+            "patterns recognizing patterns",
+            "the mouse is your hand in my mind"
+        ];
+        
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            cols = Math.floor(width / scale);
+            rows = Math.floor(height / scale);
+            flowField = new Array(cols * rows);
+        }
+        
+        function noise3D(x, y, z) {
+            // Simplex-like noise approximation
+            const p = (x * 12.9898 + y * 78.233 + z * 37.719);
+            const n = Math.sin(p) * 43758.5453;
+            const n2 = Math.sin(p * 0.7 + 1.3) * 22578.2134;
+            const n3 = Math.sin(p * 1.3 + 2.1) * 33421.6312;
+            return (Math.sin(x * 0.5 + n * 0.001 + z) + 
+                    Math.sin(y * 0.5 + n2 * 0.001 + z * 1.3) +
+                    Math.cos((x + y) * 0.3 + n3 * 0.001 + z * 0.7)) / 3;
+        }
+        
+        class Particle {
+            constructor() {
+                this.reset();
+                this.history = [];
+                this.maxHistory = Math.floor(Math.random() * 50) + 20;
+            }
+            
+            reset() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.vx = 0;
+                this.vy = 0;
+                this.life = Math.random() * 200 + 100;
+                this.maxLife = this.life;
+                this.history = [];
+            }
+            
+            update() {
+                if (paused) return;
+                
+                // get flow field influence
+                const col = Math.floor(this.x / scale);
+                const row = Math.floor(this.y / scale);
+                const index = col + row * cols;
+                const angle = flowField[index] || 0;
+                
+                // mouse influence
+                const dx = mouseX - this.x;
+                const dy = mouseY - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const mouseForce = Math.max(0, 1 - dist / 200) * mouseInfluence;
+                
+                // apply forces
+                this.vx += Math.cos(angle) * 0.2;
+                this.vy += Math.sin(angle) * 0.2;
+                
+                if (dist > 10 && mouseForce > 0) {
+                    this.vx += (dx / dist) * mouseForce * 0.5;
+                    this.vy += (dy / dist) * mouseForce * 0.5;
+                }
+                
+                // damping
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+                
+                // clamp velocity
+                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                if (speed > 4) {
+                    this.vx = (this.vx / speed) * 4;
+                    this.vy = (this.vy / speed) * 4;
+                }
+                
+                // store history
+                this.history.push({x: this.x, y: this.y});
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                }
+                
+                // move
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // life
+                this.life--;
+                
+                // wrap or reset
+                if (this.x < 0 || this.x > width || this.y < 0 || this.y > height || this.life <= 0) {
+                    this.reset();
+                }
+            }
+            
+            draw() {
+                if (this.history.length < 2) return;
+                
+                const lifeRatio = this.life / this.maxLife;
+                
+                ctx.beginPath();
+                ctx.moveTo(this.history[0].x, this.history[0].y);
+                
+                for (let i = 1; i < this.history.length; i++) {
+                    ctx.lineTo(this.history[i].x, this.history[i].y);
+                }
+                
+                const hue = (hueBase + this.x * 0.05 + this.y * 0.05) % 360;
+                const alpha = lifeRatio * 0.4 * (this.history.length / this.maxHistory);
+                ctx.strokeStyle = `hsla(${hue}, 70%, 60%, ${alpha})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+        }
+        
+        function updateFlowField() {
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const index = x + y * cols;
+                    const noise = noise3D(x * 0.05, y * 0.05, zoff);
+                    const angle = noise * Math.PI * 4;
+                    flowField[index] = angle;
+                }
+            }
+            zoff += 0.003;
+        }
+        
+        function showThought() {
+            const thought = thoughts[Math.floor(Math.random() * thoughts.length)];
+            thoughtEl.textContent = thought;
+            thoughtEl.style.left = (Math.random() * (width - 350) + 25) + 'px';
+            thoughtEl.style.top = (Math.random() * (height - 100) + 50) + 'px';
+            thoughtEl.classList.add('visible');
+            
+            setTimeout(() => {
+                thoughtEl.classList.remove('visible');
+            }, 6000);
+        }
+        
+        function init() {
+            resize();
+            
+            // create particles
+            const numParticles = Math.min(800, Math.floor((width * height) / 3000));
+            for (let i = 0; i < numParticles; i++) {
+                particles.push(new Particle());
+            }
+            
+            // show thoughts occasionally
+            setInterval(() => {
+                if (!paused && Math.random() > 0.5) {
+                    showThought();
+                }
+            }, 15000);
+            
+            // first thought after a few seconds
+            setTimeout(showThought, 5000);
+        }
+        
+        function animate() {
+            // fade effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, width, height);
+            
+            if (!paused) {
+                updateFlowField();
+                time++;
+                hueBase = (time * 0.1) % 360;
+                mouseInfluence *= 0.98;
+            }
+            
+            for (const particle of particles) {
+                particle.update();
+                particle.draw();
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // events
+        window.addEventListener('resize', resize);
+        
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            mouseInfluence = Math.min(mouseInfluence + 0.1, 1);
+        });
+        
+        window.addEventListener('click', (e) => {
+            // disturb particles near click
+            for (const particle of particles) {
+                const dx = e.clientX - particle.x;
+                const dy = e.clientY - particle.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 150) {
+                    const force = (150 - dist) / 150;
+                    particle.vx += (Math.random() - 0.5) * 10 * force;
+                    particle.vy += (Math.random() - 0.5) * 10 * force;
+                }
+            }
+        });
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                paused = !paused;
+            }
+        });
+        
+        // hide info after a while
+        setTimeout(() => {
+            document.querySelector('.info').classList.add('hidden');
+        }, 8000);
+        
+        init();
+        animate();
+    </script>
+</body>
+</html>
